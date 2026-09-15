@@ -48,6 +48,10 @@ const DEFAULT_CONFIG = {
     globalQuotaThreshold: 0, // 0 = disabled, 0.01-0.99 = minimum quota fraction before switching accounts
     requestThrottlingEnabled: false, // Opt-in: enable delay before Google API requests
     requestDelayMs: 200, // Delay in ms when throttling enabled (100-5000ms)
+    // Opt-in: serve cached quota for /account-limits within this TTL instead of
+    // fetching fresh from Google on every dashboard refresh. 0 = disabled (always
+    // fetch fresh, original behavior). Manual refresh (?refresh=true) always bypasses.
+    quotaCacheTtlMs: 0,
     // Rate limit handling (matches opencode-antigravity-auth)
     rateLimitDedupWindowMs: 2000,  // 2 seconds - prevents concurrent retry storms
     maxConsecutiveFailures: 3,     // Before applying extended cooldown

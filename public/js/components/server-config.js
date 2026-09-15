@@ -355,6 +355,12 @@ window.Components.serverConfig = () => ({
             (v) => window.Validators.validateRange(v, REQUEST_DELAY_MIN, REQUEST_DELAY_MAX, 'Request Delay'));
     },
 
+    // Quota cache TTL in ms. 0 = disabled (always fetch fresh). Up to 1 hour.
+    toggleQuotaCacheTtlMs(value) {
+        this.saveConfigField('quotaCacheTtlMs', value, 'Quota Cache TTL',
+            (v) => window.Validators.validateRange(v, 0, 3600000, 'Quota Cache TTL'));
+    },
+
     toggleMaxAccounts(value) {
         const { MAX_ACCOUNTS_MIN, MAX_ACCOUNTS_MAX } = window.AppConstants.VALIDATION;
         this.saveConfigField('maxAccounts', value, 'Max Accounts',

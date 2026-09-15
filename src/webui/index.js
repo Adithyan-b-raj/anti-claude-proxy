@@ -675,6 +675,8 @@ export function mountWebUI(app, dirname, accountManager) {
             // Validate tunable config fields via shared helper
             const updates = validateConfigFields(req.body);
 
+            const { quotaCacheTtlMs } = req.body;
+
             // Handle fields not covered by the shared helper
             if (typeof devMode === 'boolean') {
                 updates.devMode = devMode;
@@ -696,6 +698,10 @@ export function mountWebUI(app, dirname, accountManager) {
             }
             if (typeof requestDelayMs === 'number' && requestDelayMs >= 100 && requestDelayMs <= 5000) {
                 updates.requestDelayMs = requestDelayMs;
+            }
+            // Quota cache TTL: 0 disables (always fresh), otherwise 0–3,600,000 ms (up to 1h).
+            if (typeof quotaCacheTtlMs === 'number' && quotaCacheTtlMs >= 0 && quotaCacheTtlMs <= 3600000) {
+                updates.quotaCacheTtlMs = quotaCacheTtlMs;
             }
 
             if (Object.keys(updates).length === 0) {

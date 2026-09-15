@@ -357,6 +357,9 @@ app.get('/account-limits', async (req, res) => {
         const allAccounts = accountManager.getAllAccounts();
         const format = req.query.format || 'json';
         const includeHistory = req.query.includeHistory === 'true';
+        // Manual/on-demand refresh bypasses the quota cache.
+        const forceRefreshQuota = req.query.refresh === 'true';
+        const quotaCacheTtlMs = config.quotaCacheTtlMs || 0;
 
         // Fetch quotas for each account in parallel
         const results = await Promise.allSettled(
@@ -368,6 +371,20 @@ app.get('/account-limits', async (req, res) => {
                         status: 'invalid',
                         error: account.invalidReason,
                         models: {}
+                    };
+                }
+
+                // Serve cached quota (avoids an upstream Google call every dashboard
+                // tick) when caching is enabled, cache is fresh, and this isn't a
+                // manual refresh. 0 TTL keeps the original always-fresh behavior.
+                if (!forceRefreshQuota && quotaCacheTtlMs > 0 && account.quota?.lastChecked
+                    && (Date.now() - account.quota.lastChecked) < quotaCacheTtlMs) {
+                    return {
+                        email: account.email,
+                        status: 'ok',
+                        cached: true,
+                        subscription: account.subscription || { tier: 'unknown', projectId: null },
+                        models: account.quota.models || {}
                     };
                 }
 

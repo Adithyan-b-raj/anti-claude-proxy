@@ -111,13 +111,36 @@ document.addEventListener('alpine:init', () => {
         refreshTimer: null,
 
         fetchData() {
-            Alpine.store('data').fetchData();
+            // User-initiated refresh (navbar button): bypass server quota cache.
+            Alpine.store('data').fetchData(true);
         },
 
         startAutoRefresh() {
-            if (this.refreshTimer) clearInterval(this.refreshTimer);
-            const interval = parseInt(Alpine.store('settings')?.refreshInterval || 60);
-            if (interval > 0) {
+            // Clear any existing timer (both interval and timeout ids are safe to clear this way)
+            if (this.refreshTimer) {
+                clearInterval(this.refreshTimer);
+                clearTimeout(this.refreshTimer);
+                this.refreshTimer = null;
+            }
+
+            const settings = Alpine.store('settings') || {};
+            const interval = parseInt(settings.refreshInterval || 60);
+            if (!(interval > 0)) return; // 0/invalid disables auto-refresh
+
+            if (settings.pollJitter) {
+                // Jittered mode: reschedule each tick with a randomized delay so the
+                // polling cadence isn't a fixed metronome (harder to fingerprint).
+                // Delay is uniformly random in [interval, interval*2) seconds.
+                const scheduleNext = () => {
+                    const jitterMs = (interval + Math.random() * interval) * 1000;
+                    this.refreshTimer = setTimeout(() => {
+                        Alpine.store('data').fetchData();
+                        scheduleNext();
+                    }, jitterMs);
+                };
+                scheduleNext();
+            } else {
+                // Fixed mode: original metronomic interval (default behavior).
                 this.refreshTimer = setInterval(() => Alpine.store('data').fetchData(), interval * 1000);
             }
         },

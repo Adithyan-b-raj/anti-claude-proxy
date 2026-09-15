@@ -234,6 +234,20 @@
                         </div>
                     </div>
 
+                    <!-- Poll Jitter -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="toggle toggle-sm toggle-success"
+                                :checked="$store.settings.pollJitter"
+                                @change="$store.settings.toggle('pollJitter')"
+                                aria-label="Randomize polling interval">
+                            <div>
+                                <span class="label-text text-gray-300" x-text="$store.global.t('pollJitter')">Randomize polling interval</span>
+                                <p class="text-xs text-gray-500 mt-0.5" x-text="$store.global.t('pollJitterDesc')">Vary the auto-refresh timing instead of a fixed interval.</p>
+                            </div>
+                        </label>
+                    </div>
+
                     <!-- Log Buffer -->
                     <div class="form-control col-span-full">
                         <label class="label">
@@ -1933,6 +1947,58 @@
                                         </div>
                                         <p class="text-[9px] text-amber-100/40 mt-2 leading-tight">
                                             Milliseconds to wait before each API call (token refresh, quota check, messages, etc).</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quota Cache Card -->
+                            <div class="form-control bg-space-900/50 rounded-lg border transition-all duration-300 hover:border-neon-cyan/50 mt-4"
+                                :class="(serverConfig.quotaCacheTtlMs || 0) > 0 ? 'border-neon-cyan bg-neon-cyan/10 shadow-[0_0_25px_rgba(6,182,212,0.15)] ring-1 ring-neon-cyan/30' : 'border-space-border/50'">
+
+                                <!-- Toggle Row -->
+                                <div class="flex items-center justify-between p-4">
+                                    <div class="flex flex-col gap-1">
+                                        <span class="label-text font-medium transition-colors"
+                                            :class="(serverConfig.quotaCacheTtlMs || 0) > 0 ? 'text-neon-cyan' : 'text-gray-300'"
+                                            x-text="$store.global.t('quotaCache')">Cache Quota Lookups</span>
+                                        <span class="text-xs transition-colors"
+                                            :class="(serverConfig.quotaCacheTtlMs || 0) > 0 ? 'text-neon-cyan/60' : 'text-gray-500'"
+                                            x-text="$store.global.t('quotaCacheDesc')">Serve cached quota to the dashboard instead of calling Google every refresh.</span>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" class="sr-only peer"
+                                            :checked="(serverConfig.quotaCacheTtlMs || 0) > 0"
+                                            @change="toggleQuotaCacheTtlMs($event.target.checked ? 300000 : 0)"
+                                            aria-label="Quota cache toggle">
+                                        <div
+                                            class="w-9 h-5 bg-space-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-gray-600 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-neon-green peer-checked:after:bg-white">
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <!-- TTL Slider (only shown when enabled) -->
+                                <div x-show="(serverConfig.quotaCacheTtlMs || 0) > 0" x-transition x-collapse>
+                                    <div class="border-t border-neon-cyan/20 px-4 pb-4 pt-3">
+                                        <label class="flex justify-between items-center mb-2">
+                                            <span class="text-xs text-neon-cyan/70" x-text="$store.global.t('quotaCacheTtl')">Cache Duration</span>
+                                            <span class="font-mono text-neon-cyan text-xs font-semibold"
+                                                x-text="Math.round((serverConfig.quotaCacheTtlMs || 300000) / 1000) + 's'"></span>
+                                        </label>
+                                        <div class="flex gap-3 items-center">
+                                            <input type="range" min="30" max="3600" step="30"
+                                                class="custom-range custom-range-cyan flex-1"
+                                                :value="Math.round((serverConfig.quotaCacheTtlMs || 300000) / 1000)"
+                                                @input="toggleQuotaCacheTtlMs($event.target.value * 1000)"
+                                                aria-label="Quota cache TTL slider">
+                                            <input type="number" min="30" max="3600" step="30"
+                                                class="input input-xs input-bordered w-20 bg-space-800/50 border-neon-cyan/30 text-white font-mono text-center"
+                                                :value="Math.round((serverConfig.quotaCacheTtlMs || 300000) / 1000)"
+                                                @change="toggleQuotaCacheTtlMs($event.target.value * 1000)"
+                                                aria-label="Quota cache TTL value">
+                                        </div>
+                                        <p class="text-[9px] text-neon-cyan/40 mt-2 leading-tight"
+                                            x-text="$store.global.t('quotaCacheHint')">
+                                            Manual refresh always fetches fresh. Reduces background Google calls from an idle dashboard.</p>
                                     </div>
                                 </div>
                             </div>

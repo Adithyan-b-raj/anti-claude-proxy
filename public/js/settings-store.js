@@ -4,6 +4,7 @@
 document.addEventListener('alpine:init', () => {
     Alpine.store('settings', {
         refreshInterval: 60,
+        pollJitter: false, // Randomize auto-refresh interval to avoid a metronomic polling fingerprint
         logLimit: 2000,
         showExhausted: true,
         showHiddenModels: false,
@@ -45,6 +46,7 @@ document.addEventListener('alpine:init', () => {
         saveSettings(silent = false) {
             const toSave = {
                 refreshInterval: this.refreshInterval,
+                pollJitter: this.pollJitter,
                 logLimit: this.logLimit,
                 showExhausted: this.showExhausted,
                 showHiddenModels: this.showHiddenModels,

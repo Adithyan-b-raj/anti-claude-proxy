@@ -108,7 +108,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async fetchData() {
+        async fetchData(force = false) {
             // Only show skeleton on initial load if we didn't restore from cache
             if (this.initialLoad) {
                 this.loading = true;
@@ -117,8 +117,10 @@ document.addEventListener('alpine:init', () => {
                 // Get password from global store
                 const password = Alpine.store('global').webuiPassword;
 
-                // Include history for dashboard (single API call optimization)
-                const url = '/account-limits?includeHistory=true';
+                // Include history for dashboard (single API call optimization).
+                // On a manual/forced refresh, bypass the server-side quota cache.
+                let url = '/account-limits?includeHistory=true';
+                if (force) url += '&refresh=true';
                 const { response, newPassword } = await window.utils.request(url, {}, password);
 
                 if (newPassword) Alpine.store('global').webuiPassword = newPassword;
