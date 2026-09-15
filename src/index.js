@@ -12,6 +12,7 @@ import { logger } from './utils/logger.js';
 import { config } from './config.js';
 import { getStrategyLabel, STRATEGY_NAMES, DEFAULT_STRATEGY } from './account-manager/strategies/index.js';
 import { getPackageVersion } from './utils/helpers.js';
+import { getVersionSource } from './utils/version-detector.js';
 import path from 'path';
 import os from 'os';
 
@@ -155,6 +156,28 @@ ${environmentSection}
     logger.success(`Server started successfully on port ${PORT}`);
     if (isDebug) {
         logger.warn('Running in DEVELOPER mode - verbose logs enabled');
+    }
+
+    // Warn prominently if we're sending hardcoded (potentially stale) version
+    // headers. A stale X-Client-Version under a valid client is an easy signal
+    // that traffic isn't coming from the real, up-to-date Antigravity app.
+    try {
+        const vsrc = getVersionSource();
+        if (vsrc.usingFallback) {
+            logger.warn('──────────────────────────────────────────────────────────────');
+            logger.warn('⚠  Using HARDCODED version headers (Antigravity install not found).');
+            logger.warn(`   X-Client-Version: ${vsrc.clientVersion} (source: ${vsrc.clientVersionSource})`);
+            logger.warn(`   User-Agent version: ${vsrc.userAgentVersion} (source: ${vsrc.userAgentSource})`);
+            logger.warn('   These may be stale and make requests look non-official.');
+            logger.warn('   Fix: install/update Antigravity on this machine, OR set the current');
+            logger.warn('   version via env: ANTIGRAVITY_CLIENT_VERSION=<x.y.z> and');
+            logger.warn('   FALLBACK_ANTIGRAVITY_VERSION=<x.y.z> before starting.');
+            logger.warn('──────────────────────────────────────────────────────────────');
+        } else {
+            logger.debug(`Version headers OK (client: ${vsrc.clientVersionSource}, ua: ${vsrc.userAgentSource})`);
+        }
+    } catch (e) {
+        logger.debug('Version source check failed:', e.message);
     }
 });
 

@@ -65,10 +65,14 @@ async function fetchAndSaveSubscription(token, account, onSave) {
  * @throws {Error} If token refresh fails
  */
 export async function getTokenForAccount(account, tokenCache, onInvalid, onSave) {
-    // Check cache first
+    // Check cache first (effective TTL is the base interval minus a small
+    // per-entry jitter, so refreshes don't cluster on a fixed boundary).
     const cached = tokenCache.get(account.email);
-    if (cached && (Date.now() - cached.extractedAt) < TOKEN_REFRESH_INTERVAL_MS) {
-        return cached.token;
+    if (cached) {
+        const effectiveTtl = TOKEN_REFRESH_INTERVAL_MS - (cached.ttlJitterMs || 0);
+        if ((Date.now() - cached.extractedAt) < effectiveTtl) {
+            return cached.token;
+        }
     }
 
     // Get fresh token based on source
@@ -108,10 +112,16 @@ export async function getTokenForAccount(account, tokenCache, onInvalid, onSave)
         token = authData.apiKey;
     }
 
-    // Cache the token
+    // Cache the token.
+    // ttlJitterMs shortens the effective TTL by a small random amount so token
+    // refreshes don't all land exactly on the fixed TOKEN_REFRESH_INTERVAL_MS
+    // boundary (a metronomic ~5-min refresh cadence is an automation tell).
+    // Jitter is bounded to at most ~20% of the base interval and never negative.
+    const maxJitter = Math.min(90 * 1000, Math.floor(TOKEN_REFRESH_INTERVAL_MS * 0.2));
     tokenCache.set(account.email, {
         token,
-        extractedAt: Date.now()
+        extractedAt: Date.now(),
+        ttlJitterMs: Math.floor(Math.random() * maxJitter)
     });
 
     return token;

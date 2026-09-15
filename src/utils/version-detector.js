@@ -197,6 +197,40 @@ export function generateSmartUserAgent() {
 }
 
 /**
+ * Report where the version identifiers are coming from, so the server can warn
+ * the user when it is sending hardcoded (potentially stale) version headers —
+ * a stale X-Client-Version under a valid client is an easy anti-abuse flag.
+ *
+ * @returns {{ clientVersion: string, clientVersionSource: string, userAgentVersion: string, userAgentSource: string, usingFallback: boolean }}
+ */
+export function getVersionSource() {
+    // Ensure values are resolved/cached.
+    const clientVersion = getClientVersion();
+    const { version: userAgentVersion, source: userAgentSource } = getUserAgentVersionConfig();
+
+    // Recompute the client-version source (getClientVersion caches the value but
+    // not the source, so mirror its priority here without side effects).
+    let clientVersionSource;
+    if (process.env.ANTIGRAVITY_CLIENT_VERSION) {
+        clientVersionSource = 'env';
+    } else if (getProductJson()?.version) {
+        clientVersionSource = 'product.json';
+    } else {
+        clientVersionSource = 'fallback';
+    }
+
+    const usingFallback = clientVersionSource === 'fallback' || userAgentSource === 'fallback';
+
+    return {
+        clientVersion,
+        clientVersionSource,
+        userAgentVersion,
+        userAgentSource,
+        usingFallback
+    };
+}
+
+/**
  * MacOS-specific version detection using plutil
  */
 function getVersionMacos() {

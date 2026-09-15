@@ -73,19 +73,47 @@ export function isNetworkError(error) {
 }
 
 /**
- * Throttled fetch that applies a configurable delay before each request
- * Only applies delay when requestThrottlingEnabled is true
+ * Throttled fetch with an opt-in global rate limiter.
+ *
+ * When requestThrottlingEnabled is set, upstream calls are serialized so that
+ * at least `requestDelayMs` (plus a small random jitter) elapses between the
+ * START of consecutive requests. This both spaces out calls and breaks up
+ * bursty, perfectly-timed request patterns (a bot tell). When disabled, it is a
+ * plain passthrough to fetch (original behavior).
+ *
  * @param {string|URL} url - The URL to fetch
  * @param {RequestInit} [options] - Fetch options
  * @returns {Promise<Response>} Fetch response
  */
+let _rateLimitChain = Promise.resolve();
+let _lastCallTs = 0;
+
 export async function throttledFetch(url, options) {
-    if (config.requestThrottlingEnabled) {
-        const delayMs = config.requestDelayMs || 200;
-        if (delayMs > 0) {
-            await sleep(delayMs);
-        }
+    if (!config.requestThrottlingEnabled) {
+        return fetch(url, options);
     }
+
+    const baseGap = config.requestDelayMs || 200;
+
+    // Serialize gap computation so concurrent callers queue behind one another
+    // rather than all firing after the same fixed delay.
+    const waitTurn = _rateLimitChain.then(async () => {
+        const now = Date.now();
+        // Random jitter of 0–50% of the base gap on top of the min gap.
+        const jitter = Math.floor(Math.random() * (baseGap * 0.5));
+        const requiredGap = baseGap + jitter;
+        const elapsed = now - _lastCallTs;
+        const waitMs = Math.max(0, requiredGap - elapsed);
+        if (waitMs > 0) {
+            await sleep(waitMs);
+        }
+        _lastCallTs = Date.now();
+    });
+
+    // Advance the chain even if this turn throws, so the limiter never wedges.
+    _rateLimitChain = waitTurn.catch(() => {});
+
+    await waitTurn;
     return fetch(url, options);
 }
 
