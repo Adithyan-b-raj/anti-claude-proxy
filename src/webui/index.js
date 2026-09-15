@@ -22,6 +22,7 @@ import { logger } from '../utils/logger.js';
 import { getAuthorizationUrl, completeOAuthFlow, startCallbackServer } from '../auth/oauth.js';
 import { loadAccounts, saveAccounts } from '../account-manager/storage.js';
 import { getPackageVersion } from '../utils/helpers.js';
+import apiKeys from '../modules/api-keys.js';
 
 // Get package version
 const packageVersion = getPackageVersion();
@@ -572,6 +573,94 @@ export function mountWebUI(app, dirname, accountManager) {
             });
         } catch (error) {
             logger.error('[WebUI] Error getting config:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
+     * GET /api/keys - List client API keys (masked)
+     */
+    app.get('/api/keys', (req, res) => {
+        try {
+            res.json({
+                status: 'ok',
+                keys: apiKeys.listKeys(),
+                authEnforced: apiKeys.isAuthConfigured()
+            });
+        } catch (error) {
+            logger.error('[WebUI] Error listing API keys:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
+     * POST /api/keys - Create a new client API key.
+     * Body: { label?: string }
+     * Returns the full key ONCE; it cannot be retrieved again.
+     */
+    app.post('/api/keys', (req, res) => {
+        try {
+            const { label } = req.body || {};
+            if (label !== undefined && typeof label !== 'string') {
+                return res.status(400).json({ status: 'error', error: 'label must be a string' });
+            }
+            const entry = apiKeys.addKey({ label: label || '' });
+            logger.info(`[WebUI] Created API key ${entry.id}${entry.label ? ` (${entry.label})` : ''}`);
+            res.status(201).json({
+                status: 'ok',
+                message: 'API key created. Copy it now — it will not be shown again.',
+                id: entry.id,
+                key: entry.key, // full key, surfaced only on creation
+                label: entry.label,
+                enabled: entry.enabled,
+                createdAt: entry.createdAt
+            });
+        } catch (error) {
+            logger.error('[WebUI] Error creating API key:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
+     * PATCH /api/keys/:id - Update a key's label and/or enabled state.
+     * Body: { label?: string, enabled?: boolean }
+     */
+    app.patch('/api/keys/:id', (req, res) => {
+        try {
+            const { id } = req.params;
+            const { label, enabled } = req.body || {};
+            if (label !== undefined && typeof label !== 'string') {
+                return res.status(400).json({ status: 'error', error: 'label must be a string' });
+            }
+            if (enabled !== undefined && typeof enabled !== 'boolean') {
+                return res.status(400).json({ status: 'error', error: 'enabled must be a boolean' });
+            }
+            const updated = apiKeys.updateKey(id, { label, enabled });
+            if (!updated) {
+                return res.status(404).json({ status: 'error', error: 'API key not found' });
+            }
+            logger.info(`[WebUI] Updated API key ${id}`);
+            res.json({ status: 'ok', key: updated });
+        } catch (error) {
+            logger.error('[WebUI] Error updating API key:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
+     * DELETE /api/keys/:id - Revoke (delete) a key.
+     */
+    app.delete('/api/keys/:id', (req, res) => {
+        try {
+            const { id } = req.params;
+            const removed = apiKeys.revokeKey(id);
+            if (!removed) {
+                return res.status(404).json({ status: 'error', error: 'API key not found' });
+            }
+            logger.info(`[WebUI] Revoked API key ${id}`);
+            res.json({ status: 'ok', message: 'API key revoked', id });
+        } catch (error) {
+            logger.error('[WebUI] Error revoking API key:', error);
             res.status(500).json({ status: 'error', error: error.message });
         }
     });

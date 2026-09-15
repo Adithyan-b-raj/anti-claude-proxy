@@ -21,6 +21,7 @@ import { clearThinkingSignatureCache } from './format/signature-cache.js';
 import { formatDuration } from './utils/helpers.js';
 import { logger } from './utils/logger.js';
 import usageStats from './modules/usage-stats.js';
+import apiKeys from './modules/api-keys.js';
 
 // Parse fallback flag directly from command line args to avoid circular dependency
 const args = process.argv.slice(2);
@@ -81,8 +82,8 @@ app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 
 // API Key authentication middleware for /v1/* endpoints
 app.use('/v1', (req, res, next) => {
-    // Skip validation if apiKey is not configured
-    if (!config.apiKey) {
+    // Skip validation if no auth is configured (no legacy apiKey and no enabled apiKeys)
+    if (!apiKeys.isAuthConfigured()) {
         return next();
     }
 
@@ -96,7 +97,9 @@ app.use('/v1', (req, res, next) => {
         providedKey = xApiKey;
     }
 
-    if (!providedKey || providedKey !== config.apiKey) {
+    const validation = apiKeys.validateKey(providedKey);
+
+    if (!validation.valid) {
         logger.warn(`[API] Unauthorized request from ${req.ip}, invalid API key`);
         return res.status(401).json({
             type: 'error',
@@ -106,6 +109,10 @@ app.use('/v1', (req, res, next) => {
             }
         });
     }
+
+    // Attach the matched key's identity for downstream attribution/logging.
+    req.apiKeyLabel = validation.label;
+    req.apiKeyId = validation.id;
 
     next();
 });

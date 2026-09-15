@@ -31,6 +31,9 @@ function deepMerge(target, source) {
 // Default config
 const DEFAULT_CONFIG = {
     apiKey: '',
+    // Multiple client API keys. Each entry: { id, key, label, enabled, createdAt }
+    // Backward compatible: the legacy `apiKey` string above is still accepted.
+    apiKeys: [],
     webuiPassword: '',
     debug: false,
     devMode: false,
@@ -146,13 +149,39 @@ export function getPublicConfig() {
     if (publicConfig.webuiPassword) publicConfig.webuiPassword = '********';
     if (publicConfig.apiKey) publicConfig.apiKey = '********';
 
+    // Redact multi-key entries: never expose the full key, only a masked preview.
+    if (Array.isArray(publicConfig.apiKeys)) {
+        publicConfig.apiKeys = publicConfig.apiKeys.map((entry) => ({
+            id: entry.id,
+            label: entry.label || '',
+            enabled: entry.enabled !== false,
+            createdAt: entry.createdAt || null,
+            keyPreview: maskKey(entry.key)
+        }));
+    }
+
     return publicConfig;
+}
+
+/**
+ * Mask an API key for display, e.g. "sk-ag-1a2b...z9y8".
+ * @param {string} key
+ * @returns {string}
+ */
+export function maskKey(key) {
+    if (!key || typeof key !== 'string') return '';
+    if (key.length <= 12) return '****';
+    return `${key.slice(0, 9)}...${key.slice(-4)}`;
 }
 
 export function saveConfig(updates) {
     try {
-        // Apply updates (deep merge to preserve nested configs)
-        config = deepMerge(config, updates);
+        // Apply updates (deep merge to preserve nested configs).
+        // Mutate the existing object in place instead of reassigning, so that
+        // any holder of the exported `config` binding always sees current values.
+        const merged = deepMerge(config, updates);
+        Object.keys(config).forEach((k) => { delete config[k]; });
+        Object.assign(config, merged);
 
         // Save to disk
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
