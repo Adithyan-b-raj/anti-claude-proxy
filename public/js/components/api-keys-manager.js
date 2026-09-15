@@ -13,6 +13,7 @@ window.Components.apiKeysManager = () => ({
     creating: false,
     newLabel: '',
     createdKey: '', // full key shown once after creation
+    usage: {}, // keyId -> { inputTokens, outputTokens, totalTokens, requests, lastUsed }
 
     init() {
         // Fetch when this sub-tab is active, and whenever the user switches to it.
@@ -29,17 +30,42 @@ window.Components.apiKeysManager = () => ({
     async fetchKeys() {
         const store = Alpine.store('global');
         try {
-            const { response, newPassword } = await window.utils.request('/api/keys', {}, store.webuiPassword);
-            if (newPassword) store.webuiPassword = newPassword;
-            if (!response.ok) throw new Error('Failed to fetch keys');
-            const data = await response.json();
+            const [keysRes, usageRes] = await Promise.all([
+                window.utils.request('/api/keys', {}, store.webuiPassword),
+                window.utils.request('/api/keys/usage', {}, store.webuiPassword)
+            ]);
+            if (keysRes.newPassword) store.webuiPassword = keysRes.newPassword;
+            if (!keysRes.response.ok) throw new Error('Failed to fetch keys');
+            const data = await keysRes.response.json();
             this.keys = data.keys || [];
             this.authEnforced = !!data.authEnforced;
+
+            // Usage is best-effort; don't fail the whole view if it errors.
+            try {
+                if (usageRes.response.ok) {
+                    const udata = await usageRes.response.json();
+                    this.usage = udata.usage || {};
+                }
+            } catch (_) { /* ignore usage errors */ }
+
             this.loaded = true;
         } catch (e) {
             console.error('Failed to fetch API keys:', e);
             store.showToast(store.t('apiKeysFetchFailed'), 'error');
         }
+    },
+
+    // Usage lookup for a given key row.
+    usageFor(id) {
+        return this.usage[id] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0, lastUsed: null };
+    },
+
+    // Compact number formatting (e.g. 12.3K, 4.5M).
+    fmtTokens(n) {
+        const v = Number(n) || 0;
+        if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(v);
     },
 
     async createKey() {

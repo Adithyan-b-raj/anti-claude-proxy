@@ -215,6 +215,49 @@ async function runTests() {
             assert(!serialized.includes('sk-ag-secretrawvalue000000000'), 'full key leaked in serialized public config');
         });
 
+        // --- Per-key token usage tracking ---
+        console.log('\nPer-key token usage:');
+        const usageStats = (await import('../src/modules/usage-stats.js')).default;
+
+        test('trackKeyUsage accumulates input/output tokens and requests', () => {
+            usageStats.trackKeyUsage('key-a', 'alpha', 100, 40);
+            usageStats.trackKeyUsage('key-a', 'alpha', 25, 10);
+            const u = usageStats.getKeyUsage()['key-a'];
+            assertEqual(u.inputTokens, 125, 'input tokens');
+            assertEqual(u.outputTokens, 50, 'output tokens');
+            assertEqual(u.totalTokens, 175, 'total tokens');
+            assertEqual(u.requests, 2, 'request count');
+            assert(u.label === 'alpha', 'label');
+            assert(!!u.lastUsed, 'lastUsed set');
+        });
+
+        test('undefined key id buckets into "unattributed"', () => {
+            usageStats.trackKeyUsage(undefined, undefined, 7, 3);
+            const u = usageStats.getKeyUsage()['unattributed'];
+            assert(u && u.inputTokens >= 7 && u.outputTokens >= 3, 'unattributed bucket missing');
+        });
+
+        test('label refreshes on subsequent calls', () => {
+            usageStats.trackKeyUsage('key-b', 'old-label', 5, 5);
+            usageStats.trackKeyUsage('key-b', 'new-label', 5, 5);
+            assertEqual(usageStats.getKeyUsage()['key-b'].label, 'new-label');
+        });
+
+        test('negative/NaN token values are clamped to 0', () => {
+            usageStats.trackKeyUsage('key-c', 'c', -50, NaN);
+            const u = usageStats.getKeyUsage()['key-c'];
+            assertEqual(u.inputTokens, 0, 'negative clamped');
+            assertEqual(u.outputTokens, 0, 'NaN clamped');
+            assertEqual(u.requests, 1, 'request still counted');
+        });
+
+        test('getKeyUsage returns a computed totalTokens field', () => {
+            const all = usageStats.getKeyUsage();
+            Object.values(all).forEach((e) => {
+                assertEqual(e.totalTokens, e.inputTokens + e.outputTokens, 'totalTokens mismatch');
+            });
+        });
+
     } finally {
         // Restore in-memory config.
         config.apiKey = originalApiKey;

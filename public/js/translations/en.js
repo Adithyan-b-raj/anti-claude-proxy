@@ -94,6 +94,11 @@ window.translations.en = {
     apiKeysCreateFailed: "Failed to create key",
     apiKeysUpdateFailed: "Failed to update key",
     apiKeysRevokeFailed: "Failed to revoke key",
+    apiKeysInputTokens: "Input tokens",
+    apiKeysOutputTokens: "Output tokens",
+    apiKeysTotalTokens: "Total tokens",
+    apiKeysTokensSuffix: " tokens",
+    apiKeysReqSuffix: " req",
     // Dashboard
     linkedAccounts: "Linked Accounts",
     noSignal: "NO SIGNAL DETECTED",

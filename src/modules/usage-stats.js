@@ -13,6 +13,9 @@ const OLD_HISTORY_FILE = path.join(OLD_DATA_DIR, 'usage-history.json');
 // In-memory storage
 // Structure: { "YYYY-MM-DDTHH:00:00.000Z": { "claude": { "model-name": count, "_subtotal": count }, "_total": count } }
 let history = {};
+// Per-key cumulative token usage.
+// Structure: { [keyId]: { label, inputTokens, outputTokens, requests, lastUsed } }
+let keyUsage = {};
 let isDirty = false;
 
 /**
@@ -62,6 +65,12 @@ function load() {
         if (fs.existsSync(HISTORY_FILE)) {
             const data = fs.readFileSync(HISTORY_FILE, 'utf8');
             history = JSON.parse(data);
+            // Per-key usage is stored under a reserved key inside the same file
+            // to stay backward compatible with existing history files.
+            if (history.__keyUsage__ && typeof history.__keyUsage__ === 'object') {
+                keyUsage = history.__keyUsage__;
+            }
+            delete history.__keyUsage__;
         }
     } catch (err) {
         logger.error('[UsageStats] Failed to load history:', err);
@@ -75,7 +84,10 @@ function load() {
 function save() {
     if (!isDirty) return;
     try {
-        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+        // Write history plus per-key usage under a reserved key, without
+        // mutating the in-memory history object.
+        const payload = { ...history, __keyUsage__: keyUsage };
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(payload, null, 2));
         isDirty = false;
     } catch (err) {
         logger.error('[UsageStats] Failed to save history:', err);
@@ -136,6 +148,60 @@ function track(modelId) {
 }
 
 /**
+ * Track token usage attributed to a specific API key.
+ * Reads token counts already returned by the upstream API (no local
+ * tokenization), so the cost is a couple of integer additions per request.
+ *
+ * @param {string} keyId - The API key id (or 'unattributed' when auth is open)
+ * @param {string} label - Human-readable label for display
+ * @param {number} inputTokens - Prompt/input tokens for this request
+ * @param {number} outputTokens - Completion/output tokens for this request
+ */
+function trackKeyUsage(keyId, label, inputTokens = 0, outputTokens = 0) {
+    const id = keyId || 'unattributed';
+
+    if (!keyUsage[id]) {
+        keyUsage[id] = {
+            label: label || '',
+            inputTokens: 0,
+            outputTokens: 0,
+            requests: 0,
+            lastUsed: null
+        };
+    }
+
+    const entry = keyUsage[id];
+    // Keep label fresh (it may have been relabeled).
+    if (label) entry.label = label;
+    entry.inputTokens += Math.max(0, Number(inputTokens) || 0);
+    entry.outputTokens += Math.max(0, Number(outputTokens) || 0);
+    entry.requests += 1;
+    entry.lastUsed = new Date().toISOString();
+
+    isDirty = true;
+}
+
+/**
+ * Get per-key token usage totals.
+ * @returns {Object} Map of keyId -> { label, inputTokens, outputTokens, totalTokens, requests, lastUsed }
+ */
+function getKeyUsage() {
+    const result = {};
+    Object.keys(keyUsage).forEach((id) => {
+        const e = keyUsage[id];
+        result[id] = {
+            label: e.label || '',
+            inputTokens: e.inputTokens || 0,
+            outputTokens: e.outputTokens || 0,
+            totalTokens: (e.inputTokens || 0) + (e.outputTokens || 0),
+            requests: e.requests || 0,
+            lastUsed: e.lastUsed || null
+        };
+    });
+    return result;
+}
+
+/**
  * Setup Express Middleware
  * @param {import('express').Application} app
  */
@@ -181,6 +247,10 @@ function setupRoutes(app) {
         });
         res.json(sortedData);
     });
+
+    app.get('/api/keys/usage', (req, res) => {
+        res.json({ status: 'ok', usage: getKeyUsage() });
+    });
 }
 
 /**
@@ -200,6 +270,8 @@ export default {
     setupMiddleware,
     setupRoutes,
     track,
+    trackKeyUsage,
+    getKeyUsage,
     getFamily,
     getShortName,
     getHistory

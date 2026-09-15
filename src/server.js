@@ -826,19 +826,52 @@ app.post('/v1/messages', async (req, res) => {
                 res.setHeader('X-Accel-Buffering', 'no');
                 res.flushHeaders();
 
+                // Track token usage from stream events to attribute to the API key.
+                // message_start carries input tokens; message_delta carries the
+                // (cumulative) output token count. These are provided by upstream.
+                let streamInputTokens = 0;
+                let streamOutputTokens = 0;
+                const captureUsage = (event) => {
+                    try {
+                        if (!event || typeof event !== 'object') return;
+                        if (event.type === 'message_start' && event.message?.usage) {
+                            const mu = event.message.usage;
+                            streamInputTokens = (mu.input_tokens || 0)
+                                + (mu.cache_read_input_tokens || 0)
+                                + (mu.cache_creation_input_tokens || 0);
+                            if (typeof mu.output_tokens === 'number') {
+                                streamOutputTokens = mu.output_tokens;
+                            }
+                        } else if (event.type === 'message_delta' && event.usage) {
+                            if (typeof event.usage.output_tokens === 'number') {
+                                streamOutputTokens = event.usage.output_tokens;
+                            }
+                        }
+                    } catch (_) { /* best-effort */ }
+                };
+
                 // If the generator isn't done, send the first chunk
                 if (!firstResult.done) {
+                    captureUsage(firstResult.value);
                     res.write(`event: ${firstResult.value.type}\ndata: ${JSON.stringify(firstResult.value)}\n\n`);
                     if (res.flush) res.flush();
                 }
 
                 // Continue with the rest of the stream
                 for await (const event of generator) {
+                    captureUsage(event);
                     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
                     if (res.flush) res.flush();
                 }
-                
+
                 res.end();
+
+                // Record attributed usage once the stream completes.
+                try {
+                    usageStats.trackKeyUsage(req.apiKeyId, req.apiKeyLabel, streamInputTokens, streamOutputTokens);
+                } catch (e) {
+                    logger.debug('[API] Failed to record per-key usage (stream):', e.message);
+                }
 
             } catch (error) {
                 // If we haven't sent headers yet, we can send a proper error status
@@ -870,6 +903,18 @@ app.post('/v1/messages', async (req, res) => {
         } else {
             // Handle non-streaming response
             const response = await sendMessage(request, accountManager, FALLBACK_ENABLED);
+
+            // Attribute token usage to the calling API key (usage is provided by
+            // the upstream response; no local tokenization).
+            try {
+                const u = response?.usage || {};
+                const inTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+                const outTok = u.output_tokens || 0;
+                usageStats.trackKeyUsage(req.apiKeyId, req.apiKeyLabel, inTok, outTok);
+            } catch (e) {
+                logger.debug('[API] Failed to record per-key usage (non-stream):', e.message);
+            }
+
             res.json(response);
         }
 

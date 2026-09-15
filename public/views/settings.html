@@ -153,6 +153,27 @@
                                         x-text="$store.global.t('apiKeysDisabled')">disabled</span>
                                 </div>
                                 <div class="text-xs text-gray-500 font-mono mt-0.5" x-text="k.keyPreview"></div>
+                                <!-- Token usage -->
+                                <div class="flex items-center gap-3 mt-1.5 text-[11px] font-mono text-gray-500">
+                                    <span class="flex items-center gap-1" :title="$store.global.t('apiKeysInputTokens')">
+                                        <span class="text-neon-cyan">↓</span>
+                                        <span x-text="fmtTokens(usageFor(k.id).inputTokens)"></span>
+                                    </span>
+                                    <span class="flex items-center gap-1" :title="$store.global.t('apiKeysOutputTokens')">
+                                        <span class="text-neon-purple">↑</span>
+                                        <span x-text="fmtTokens(usageFor(k.id).outputTokens)"></span>
+                                    </span>
+                                    <span class="text-gray-600">·</span>
+                                    <span :title="$store.global.t('apiKeysTotalTokens')">
+                                        <span x-text="fmtTokens(usageFor(k.id).totalTokens)"></span>
+                                        <span x-text="$store.global.t('apiKeysTokensSuffix')">tokens</span>
+                                    </span>
+                                    <span class="text-gray-600">·</span>
+                                    <span>
+                                        <span x-text="usageFor(k.id).requests"></span>
+                                        <span x-text="$store.global.t('apiKeysReqSuffix')">req</span>
+                                    </span>
+                                </div>
                             </div>
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" class="toggle toggle-sm toggle-success" :checked="k.enabled"
