@@ -60,6 +60,25 @@ export function listKeys() {
 }
 
 /**
+ * Get a single key entry's FULL secret by id. Intended only for the
+ * password-protected WebUI "reveal" action — never expose this on unauthenticated
+ * routes. Returns null if the id is unknown.
+ * @param {string} id
+ * @returns {{id:string,label:string,enabled:boolean,createdAt:number,key:string}|null}
+ */
+export function getKeyById(id) {
+    const entry = getRawKeys().find((k) => k.id === id);
+    if (!entry) return null;
+    return {
+        id: entry.id,
+        label: entry.label || '',
+        enabled: entry.enabled !== false,
+        createdAt: entry.createdAt || null,
+        key: entry.key
+    };
+}
+
+/**
  * Create and persist a new API key.
  * @param {Object} [opts]
  * @param {string} [opts.label] - Optional human-readable label.
@@ -195,6 +214,7 @@ export default {
     generateKeyString,
     getRawKeys,
     listKeys,
+    getKeyById,
     addKey,
     updateKey,
     revokeKey,

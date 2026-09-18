@@ -177,6 +177,17 @@ async function runTests() {
                 assert(typeof k.keyPreview === 'string' && k.keyPreview.includes('...'), 'preview not masked');
             }
         });
+        test('getKeyById returns the FULL secret for the reveal action', () => {
+            const entry = apiKeys.addKey({ label: 'reveal-me' });
+            const revealed = apiKeys.getKeyById(entry.id);
+            assert(revealed, 'getKeyById returned null for a known id');
+            assertEqual(revealed.key, entry.key, 'revealed key does not match created key');
+            assertEqual(revealed.id, entry.id);
+            assertEqual(revealed.label, 'reveal-me');
+        });
+        test('getKeyById returns null for an unknown id', () => {
+            assertEqual(apiKeys.getKeyById('nonexistent-id'), null);
+        });
         test('updateKey can disable a key so it no longer validates', () => {
             const entry = apiKeys.addKey({ label: 'temp' });
             const updated = apiKeys.updateKey(entry.id, { enabled: false });

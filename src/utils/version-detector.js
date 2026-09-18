@@ -154,11 +154,19 @@ function getUserAgentVersionConfig() {
     }
 
     const product = getProductJson();
-    if (product?.ideVersion && isVersionHigher(product.ideVersion, FALLBACK_USER_AGENT_VERSION)) {
+    // product.json is the authoritative local install manifest. If it declares an
+    // ideVersion, trust it verbatim — do NOT gate it behind isVersionHigher against
+    // the hardcoded fallback. Antigravity's ideVersion tracks the underlying IDE
+    // build (e.g. 1.19.6) which can be numerically LOWER than the User-Agent fallback
+    // (2.0.3); the old guard silently discarded the real value in that case and sent
+    // a stale hardcoded version instead.
+    if (product?.ideVersion) {
         return { version: product.ideVersion, source: 'product.json' };
     }
 
-    // OS-specific detection (legacy — reads app binary metadata directly)
+    // OS-specific detection (legacy — reads app binary metadata directly). This is a
+    // heuristic fallback when product.json is absent, so we keep the isVersionHigher
+    // guard here to avoid regressing to an obviously-too-old binary metadata value.
     const os = platform();
     let detectedVersion = null;
     try {

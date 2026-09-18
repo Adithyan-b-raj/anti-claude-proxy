@@ -11,6 +11,9 @@ const path = require('path');
 const tests = [
     { name: 'Account Selection Strategies', file: 'test-strategies.cjs' },
     { name: 'Multiple API Keys', file: 'test-api-keys.cjs' },
+    { name: 'Per-Model Rate-Limit Failures', file: 'test-permodel-failures.mjs' },
+    { name: 'Billing Header Stripping', file: 'test-billing-header-strip.mjs' },
+    { name: 'Version Fallback (product.json)', file: 'test-version-fallback.mjs' },
     { name: 'Cache Control Stripping', file: 'test-cache-control.cjs' },
     { name: 'Thinking Signatures', file: 'test-thinking-signatures.cjs' },
     { name: 'Multi-turn Tools (Non-Streaming)', file: 'test-multiturn-thinking-tools.cjs' },

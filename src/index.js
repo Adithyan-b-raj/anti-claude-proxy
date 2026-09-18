@@ -164,14 +164,22 @@ ${environmentSection}
     try {
         const vsrc = getVersionSource();
         if (vsrc.usingFallback) {
+            // Identify which specific header(s) fell back, so the message is accurate
+            // even when the install was partially detected (e.g. client version from
+            // product.json but User-Agent version from fallback).
+            const stale = [];
+            if (vsrc.clientVersionSource === 'fallback') stale.push('X-Client-Version');
+            if (vsrc.userAgentSource === 'fallback') stale.push('User-Agent version');
+
             logger.warn('──────────────────────────────────────────────────────────────');
-            logger.warn('⚠  Using HARDCODED version headers (Antigravity install not found).');
+            logger.warn(`⚠  Using hardcoded fallback for: ${stale.join(' and ')} (may be stale).`);
             logger.warn(`   X-Client-Version: ${vsrc.clientVersion} (source: ${vsrc.clientVersionSource})`);
             logger.warn(`   User-Agent version: ${vsrc.userAgentVersion} (source: ${vsrc.userAgentSource})`);
-            logger.warn('   These may be stale and make requests look non-official.');
+            logger.warn('   Stale version headers can make requests look non-official.');
             logger.warn('   Fix: install/update Antigravity on this machine, OR set the current');
-            logger.warn('   version via env: ANTIGRAVITY_CLIENT_VERSION=<x.y.z> and');
-            logger.warn('   FALLBACK_ANTIGRAVITY_VERSION=<x.y.z> before starting.');
+            logger.warn('   version via env before starting:');
+            logger.warn('     ANTIGRAVITY_CLIENT_VERSION=<x.y.z>   (X-Client-Version)');
+            logger.warn('     FALLBACK_ANTIGRAVITY_VERSION=<x.y.z>  (User-Agent version)');
             logger.warn('──────────────────────────────────────────────────────────────');
         } else {
             logger.debug(`Version headers OK (client: ${vsrc.clientVersionSource}, ua: ${vsrc.userAgentSource})`);

@@ -25,6 +25,35 @@ import {
 import { logger } from '../utils/logger.js';
 
 /**
+ * Strip Anthropic telemetry / billing pseudo-headers from a system prompt text block.
+ *
+ * Starting in Claude Code CLI v2.1.274, the CLI injects internal billing metadata as
+ * the first block in the `system` array, e.g.:
+ *   "x-anthropic-billing-header: cc_version=2.1.274.834; cc_entrypoint=sdk-cli;"
+ * When this text is forwarded inside Google Cloud Code's `systemInstruction.parts`,
+ * cloudcode-pa.googleapis.com detects the `x-anthropic-*` string and deliberately
+ * returns an opaque 429 RESOURCE_EXHAUSTED error (fake quota exhaustion). OpenCode is
+ * unaffected because it does not inject this header.
+ *
+ * This removes any line beginning with an `x-anthropic-*:` pseudo-header (case-
+ * insensitive, tolerant of leading whitespace) so it never reaches Google.
+ *
+ * @param {string} text - Raw system prompt text
+ * @returns {string} Cleaned text with billing/telemetry pseudo-header lines removed
+ */
+export function cleanSystemInstructionText(text) {
+    if (typeof text !== 'string' || text.length === 0) return text;
+    // Match a full line that is an x-anthropic-* pseudo-header. The explicit
+    // billing-header rule is kept for clarity; the general rule requires a colon
+    // so it only matches actual header lines (not prose mentioning "x-anthropic-*").
+    // The `m` flag anchors ^ per line; we also swallow the trailing newline.
+    const cleaned = text
+        .replace(/^x-anthropic-billing-header:[^\n]*\n?/gim, '')
+        .replace(/^x-anthropic-[a-z0-9_-]+:[^\n]*\n?/gim, '');
+    return cleaned.trim();
+}
+
+/**
  * Convert Anthropic Messages API request to the format expected by Cloud Code
  *
  * Uses Google Generative AI format, but for Claude models:
@@ -56,14 +85,20 @@ export function convertAnthropicToGoogle(anthropicRequest) {
     if (system) {
         let systemParts = [];
         if (typeof system === 'string') {
-            systemParts = [{ text: system }];
+            systemParts = [{ text: cleanSystemInstructionText(system) }];
         } else if (Array.isArray(system)) {
             // Filter for text blocks as system prompts are usually text
             // Anthropic supports text blocks in system prompts
             systemParts = system
                 .filter(block => block.type === 'text')
-                .map(block => ({ text: block.text }));
+                .map(block => ({ text: cleanSystemInstructionText(block.text) }));
         }
+
+        // Prune parts that became empty after stripping telemetry pseudo-headers
+        // (e.g. Claude Code's injected billing block, which is a standalone part).
+        // Empty systemInstruction parts are both useless and can themselves trip
+        // upstream validation, so drop them.
+        systemParts = systemParts.filter(part => part.text && part.text.length > 0);
 
         if (systemParts.length > 0) {
             googleRequest.systemInstruction = {

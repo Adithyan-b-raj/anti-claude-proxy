@@ -594,6 +594,27 @@ export function mountWebUI(app, dirname, accountManager) {
     });
 
     /**
+     * GET /api/keys/:id/reveal - Return the FULL secret for a single key.
+     * Password-protected by the WebUI auth middleware (all /api/* routes except
+     * the auth-url/config-get exceptions). Lets a user recover a key they didn't
+     * copy at creation time. Logged for auditability.
+     */
+    app.get('/api/keys/:id/reveal', (req, res) => {
+        try {
+            const { id } = req.params;
+            const entry = apiKeys.getKeyById(id);
+            if (!entry) {
+                return res.status(404).json({ status: 'error', error: 'API key not found' });
+            }
+            logger.info(`[WebUI] Revealed API key ${id}`);
+            res.json({ status: 'ok', id: entry.id, key: entry.key });
+        } catch (error) {
+            logger.error('[WebUI] Error revealing API key:', error);
+            res.status(500).json({ status: 'error', error: error.message });
+        }
+    });
+
+    /**
      * POST /api/keys - Create a new client API key.
      * Body: { label?: string }
      * Returns the full key ONCE; it cannot be retrieved again.

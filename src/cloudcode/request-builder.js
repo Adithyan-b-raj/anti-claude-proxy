@@ -25,6 +25,14 @@ import { deriveSessionId } from './session-manager.js';
 // the ANTIGRAVITY_SCRUB_IDENTITY env var, formatted as a comma-separated list of
 // "Term=>Replacement" pairs, e.g. "Nous Research=>the team,Hermes=>the assistant".
 const DEFAULT_IDENTITY_SCRUB = [
+    // Claude Code / Anthropic — Claude Code's system prompts identify as
+    // "Claude, made by Anthropic", which trips cloudcode-pa's third-party AI
+    // filter (issue #375, Trigger #2). Order matters: the more specific phrase
+    // must be replaced before the shorter substring it contains.
+    ['Claude Code', 'the coding assistant'],
+    ['Anthropic', 'the development team'],
+    ['Claude', 'the assistant'],
+    // Hermes / Nous Research (original scrub targets from #364)
     ['Nous Research', 'the assistant team'],
     ['Hermes Agent', 'the assistant'],
     ['Hermes', 'the assistant']
@@ -50,10 +58,18 @@ const IDENTITY_SCRUB_RULES = [
 function scrubClientIdentity(text) {
     if (typeof text !== 'string') return text;
     let out = text;
+    // Defensive second layer: strip Anthropic telemetry / billing pseudo-headers.
+    // The primary strip happens in request-converter.cleanSystemInstructionText, but
+    // we repeat it here so any system text reaching the Cloud Code payload is clean
+    // even if it arrived through a path that bypassed the converter. cloudcode-pa
+    // returns an opaque 429 when it sees the `x-anthropic-*` header string.
+    out = out
+        .replace(/^x-anthropic-billing-header:[^\n]*\n?/gim, '')
+        .replace(/^x-anthropic-[a-z0-9_-]+:[^\n]*\n?/gim, '');
     for (const [term, replacement] of IDENTITY_SCRUB_RULES) {
         out = out.split(term).join(replacement);
     }
-    return out;
+    return out.trim();
 }
 
 /**
@@ -80,11 +96,16 @@ export function buildCloudCodeRequest(anthropicRequest, projectId, accountEmail)
     ];
 
     // Append any existing system instructions from the request, scrubbing
-    // third-party AI product identities that trip cloudcode-pa's 429 (see above).
+    // third-party AI product identities and telemetry/billing pseudo-headers that
+    // trip cloudcode-pa's 429 (see above). Skip parts that become empty after
+    // scrubbing so we never forward a blank part.
     if (googleRequest.systemInstruction && googleRequest.systemInstruction.parts) {
         for (const part of googleRequest.systemInstruction.parts) {
             if (part.text) {
-                systemParts.push({ text: scrubClientIdentity(part.text) });
+                const scrubbed = scrubClientIdentity(part.text);
+                if (scrubbed && scrubbed.trim().length > 0) {
+                    systemParts.push({ text: scrubbed });
+                }
             }
         }
     }

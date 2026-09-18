@@ -181,7 +181,7 @@ export async function* sendMessageStream(anthropicRequest, accountManager, fallb
 
                         if (response.status === 429) {
                             const resetMs = parseResetTime(response, errorText);
-                            const consecutiveFailures = accountManager.getConsecutiveFailures?.(account.email) || 0;
+                            const consecutiveFailures = accountManager.getConsecutiveFailures?.(account.email, model) || 0;
 
                             // Check if capacity issue (NOT quota) - retry same endpoint with progressive backoff
                             if (isModelCapacityExhausted(errorText)) {
@@ -191,7 +191,7 @@ export async function* sendMessageStream(anthropicRequest, accountManager, fallb
                                     const waitMs = resetMs || CAPACITY_BACKOFF_TIERS_MS[tierIndex];
                                     capacityRetryCount++;
                                     // Track failures for progressive backoff escalation (matches opencode-antigravity-auth)
-                                    accountManager.incrementConsecutiveFailures(account.email);
+                                    accountManager.incrementConsecutiveFailures(account.email, model);
                                     logger.info(`[CloudCode] Model capacity exhausted, retry ${capacityRetryCount}/${MAX_CAPACITY_RETRIES} after ${formatDuration(waitMs)}...`);
                                     await sleep(waitMs);
                                     // Don't increment endpointIndex - retry same endpoint
@@ -262,7 +262,7 @@ export async function* sendMessageStream(anthropicRequest, accountManager, fallb
                                 const tierIndex = Math.min(capacityRetryCount, CAPACITY_BACKOFF_TIERS_MS.length - 1);
                                 const waitMs = CAPACITY_BACKOFF_TIERS_MS[tierIndex];
                                 capacityRetryCount++;
-                                accountManager.incrementConsecutiveFailures(account.email);
+                                accountManager.incrementConsecutiveFailures(account.email, model);
                                 logger.info(`[CloudCode] ${response.status} Model capacity exhausted, retry ${capacityRetryCount}/${MAX_CAPACITY_RETRIES} after ${formatDuration(waitMs)}...`);
                                 await sleep(waitMs);
                                 // Don't increment endpointIndex - retry same endpoint

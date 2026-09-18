@@ -14,6 +14,8 @@ window.Components.apiKeysManager = () => ({
     newLabel: '',
     createdKey: '', // full key shown once after creation
     usage: {}, // keyId -> { inputTokens, outputTokens, totalTokens, requests, lastUsed }
+    revealed: {}, // keyId -> full key string (populated on demand via the eye button)
+    revealing: {}, // keyId -> true while a reveal request is in flight
 
     init() {
         // Fetch when this sub-tab is active, and whenever the user switches to it.
@@ -66,6 +68,73 @@ window.Components.apiKeysManager = () => ({
         if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
         if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
         return String(v);
+    },
+
+    // Whether a given key's full secret is currently revealed in the UI.
+    isRevealed(id) {
+        return !!this.revealed[id];
+    },
+
+    // The string to render for a key row: full secret when revealed, else masked.
+    displayKey(k) {
+        return this.revealed[k.id] || k.keyPreview;
+    },
+
+    // Toggle reveal for a key. Hiding is instant; revealing fetches the full
+    // secret on demand from the password-protected /reveal endpoint (the list
+    // response only ever contains the masked preview).
+    async toggleReveal(k) {
+        if (this.revealed[k.id]) {
+            // Hide: drop the cached secret from memory.
+            const next = { ...this.revealed };
+            delete next[k.id];
+            this.revealed = next;
+            return;
+        }
+        if (this.revealing[k.id]) return; // already fetching
+        const store = Alpine.store('global');
+        this.revealing = { ...this.revealing, [k.id]: true };
+        try {
+            const { response, newPassword } = await window.utils.request(
+                `/api/keys/${k.id}/reveal`, {}, store.webuiPassword
+            );
+            if (newPassword) store.webuiPassword = newPassword;
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || 'Failed to reveal key');
+            }
+            const data = await response.json();
+            this.revealed = { ...this.revealed, [k.id]: data.key };
+        } catch (e) {
+            store.showToast(store.t('apiKeysRevealFailed') + ': ' + e.message, 'error');
+        } finally {
+            const next = { ...this.revealing };
+            delete next[k.id];
+            this.revealing = next;
+        }
+    },
+
+    // Copy a specific key's full secret (revealing it first if needed).
+    async copyKey(k) {
+        const store = Alpine.store('global');
+        try {
+            let secret = this.revealed[k.id];
+            if (!secret) {
+                const { response, newPassword } = await window.utils.request(
+                    `/api/keys/${k.id}/reveal`, {}, store.webuiPassword
+                );
+                if (newPassword) store.webuiPassword = newPassword;
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || 'Failed to reveal key');
+                }
+                secret = (await response.json()).key;
+            }
+            await navigator.clipboard.writeText(secret);
+            store.showToast(store.t('apiKeysCopied'), 'success');
+        } catch (e) {
+            store.showToast(store.t('apiKeysCopyFailed'), 'error');
+        }
     },
 
     async createKey() {

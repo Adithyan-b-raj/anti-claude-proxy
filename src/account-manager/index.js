@@ -203,7 +203,7 @@ export class AccountManager {
         }
         // Reset consecutive failures on success (matches opencode-antigravity-auth)
         if (account?.email) {
-            resetFailures(this.#accounts, account.email);
+            resetFailures(this.#accounts, account.email, modelId);
         }
     }
 
@@ -235,8 +235,8 @@ export class AccountManager {
      * @param {string} email - Account email
      * @returns {number} Number of consecutive failures
      */
-    getConsecutiveFailures(email) {
-        return getFailures(this.#accounts, email);
+    getConsecutiveFailures(email, modelId) {
+        return getFailures(this.#accounts, email, modelId);
     }
 
     /**
@@ -245,8 +245,8 @@ export class AccountManager {
      * @param {string} email - Account email
      * @returns {number} New consecutive failure count
      */
-    incrementConsecutiveFailures(email) {
-        return incrementFailures(this.#accounts, email);
+    incrementConsecutiveFailures(email, modelId) {
+        return incrementFailures(this.#accounts, email, modelId);
     }
 
     /**

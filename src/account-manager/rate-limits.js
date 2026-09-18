@@ -133,7 +133,16 @@ export function markRateLimited(accounts, email, resetMs = null, modelId) {
         actualResetMs: actualResetMs             // Original duration from API
     };
 
-    // Track consecutive failures for progressive backoff (matches opencode-antigravity-auth)
+    // Track consecutive failures for progressive backoff (matches opencode-antigravity-auth).
+    // Failures are tracked PER-MODEL so that a burst-induced rate limit on one model
+    // (e.g. claude-opus) does not inflate the progressive-backoff tier for an unrelated,
+    // barely-used model (e.g. gemini-flash). See rate-limit-state.calculateSmartBackoff.
+    if (!account.modelFailures) {
+        account.modelFailures = {};
+    }
+    account.modelFailures[modelId] = (account.modelFailures[modelId] || 0) + 1;
+    // Keep the legacy account-level counter in sync for backward compatibility
+    // (used by 5xx/network extended-cooldown logic that is not model-specific).
     account.consecutiveFailures = (account.consecutiveFailures || 0) + 1;
 
     // Log appropriately based on duration
@@ -273,9 +282,19 @@ export function getRateLimitInfo(accounts, email, modelId) {
  * @param {string} email - Email of the account
  * @returns {number} Number of consecutive failures
  */
-export function getConsecutiveFailures(accounts, email) {
+export function getConsecutiveFailures(accounts, email, modelId) {
     const account = accounts.find(a => a.email === email);
-    return account?.consecutiveFailures || 0;
+    if (!account) return 0;
+    // When a model is specified, the per-model count is authoritative. A missing
+    // entry means this model has not failed yet -> 0. We must NOT fall back to the
+    // account-level counter here, or failures from other models would leak in
+    // (the original bug: a first 429 on gemini inheriting opus's 30m tier).
+    if (modelId) {
+        return account.modelFailures?.[modelId] || 0;
+    }
+    // No model specified (e.g. 5xx/network extended-cooldown logic): use the
+    // account-level counter, which aggregates across models by design.
+    return account.consecutiveFailures || 0;
 }
 
 /**
@@ -286,9 +305,15 @@ export function getConsecutiveFailures(accounts, email) {
  * @param {string} email - Email of the account
  * @returns {boolean} True if account was found and reset
  */
-export function resetConsecutiveFailures(accounts, email) {
+export function resetConsecutiveFailures(accounts, email, modelId) {
     const account = accounts.find(a => a.email === email);
     if (!account) return false;
+    // Reset the per-model counter for the model that just succeeded.
+    if (modelId && account.modelFailures) {
+        account.modelFailures[modelId] = 0;
+    }
+    // A success is a strong positive health signal, so also clear the legacy
+    // account-level counter used by non-model-specific cooldown logic.
     account.consecutiveFailures = 0;
     return true;
 }
@@ -302,10 +327,15 @@ export function resetConsecutiveFailures(accounts, email) {
  * @param {string} email - Email of the account
  * @returns {number} New consecutive failure count
  */
-export function incrementConsecutiveFailures(accounts, email) {
+export function incrementConsecutiveFailures(accounts, email, modelId) {
     const account = accounts.find(a => a.email === email);
     if (!account) return 0;
     account.consecutiveFailures = (account.consecutiveFailures || 0) + 1;
+    if (modelId) {
+        if (!account.modelFailures) account.modelFailures = {};
+        account.modelFailures[modelId] = (account.modelFailures[modelId] || 0) + 1;
+        return account.modelFailures[modelId];
+    }
     return account.consecutiveFailures;
 }
 
