@@ -313,10 +313,13 @@ export function mountWebUI(app, dirname, accountManager) {
     // Static-page gate: lock the dashboard itself (not just the API).
     // When a password is configured, an unauthenticated visitor must not be
     // able to load the dashboard HTML/JS at all. Only the login page and its
-    // assets (plus the public auth endpoints, already exempted above) are
-    // reachable. HTML navigations are redirected to the login page; other
-    // asset requests get a 401. This is what prevents other people from using
-    // your setup without the env password.
+    // assets are reachable; HTML navigations are redirected to the login page.
+    //
+    // IMPORTANT: this gate must ONLY protect the browser dashboard. It must
+    // never touch the proxy/API surface that Claude Code and other clients use
+    // (they authenticate with their own API key via the /v1 middleware, NOT the
+    // WebUI password). Blocking those here 401s Claude Code with
+    // "Unauthorized: Password required".
     // ------------------------------------------------------------------
     const PUBLIC_STATIC = new Set([
         '/login.html',
@@ -324,19 +327,39 @@ export function mountWebUI(app, dirname, accountManager) {
         '/favicon.svg',
         '/css/style.css'
     ]);
+    // Path prefixes that belong to the API/proxy surface, not the dashboard.
+    // These are handled by their own auth (API-key for /v1, WebUI-password
+    // middleware above for /api, /account-limits, /health) and must bypass the
+    // dashboard gate entirely.
+    const API_PREFIXES = ['/api/', '/v1/', '/.well-known/'];
+    const API_EXACT = new Set([
+        '/v1',
+        '/health',
+        '/account-limits',
+        '/refresh-token',
+        '/test/clear-signature-cache'
+    ]);
     app.use((req, res, next) => {
         const password = config.webuiPassword;
-        if (!password) return next();               // Open mode: no gate.
-        if (req.path.startsWith('/api/')) return next(); // APIs handled above.
+        if (!password) return next();                    // Open mode: no gate.
+
+        // Never gate the API/proxy surface (Claude Code, /v1, health, etc.).
+        if (API_PREFIXES.some(p => req.path.startsWith(p))) return next();
+        if (API_EXACT.has(req.path)) return next();
+        // Root path is used by Claude Code for heartbeat POSTs; only guard it
+        // for browser (GET/HTML) navigations, handled below.
+        if (req.method !== 'GET') return next();
+
         if (PUBLIC_STATIC.has(req.path)) return next();  // Login page assets.
 
         // Authenticated (valid cookie/header/query)? Let it through.
         if (getProvidedPassword(req) === password) return next();
 
-        // Unauthenticated: send browser navigations to the login page, and
-        // reject direct asset fetches so nothing useful loads.
+        // Unauthenticated browser navigation -> login page. Any other
+        // unauthenticated GET for a dashboard asset gets redirected too so the
+        // SPA can't partially load.
         const accept = req.headers['accept'] || '';
-        if (req.method === 'GET' && accept.includes('text/html')) {
+        if (accept.includes('text/html')) {
             return res.redirect(302, '/login.html');
         }
         return res.status(401).json({ status: 'error', error: 'Unauthorized: Password required' });
