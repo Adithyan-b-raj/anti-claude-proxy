@@ -112,6 +112,52 @@ async function addAccount(accountData) {
  * Auth Middleware - Optional password protection for WebUI
  * Password can be set via WEBUI_PASSWORD env var or config.json
  */
+
+// Name of the auth cookie set on successful login. HttpOnly so page scripts
+// can't read it; it lets the server gate the dashboard HTML/assets, not just
+// the API. Value is the configured password (compared constant-ish here since
+// this is a single shared secret from the operator's environment).
+const AUTH_COOKIE = 'ag_webui_auth';
+
+/**
+ * Parse a specific cookie value from a raw Cookie header. Avoids adding a
+ * cookie-parser dependency for a single cookie.
+ * @param {string|undefined} cookieHeader
+ * @param {string} name
+ * @returns {string} decoded value or ''
+ */
+function readCookie(cookieHeader, name) {
+    if (!cookieHeader || typeof cookieHeader !== 'string') return '';
+    const parts = cookieHeader.split(';');
+    for (const part of parts) {
+        const idx = part.indexOf('=');
+        if (idx === -1) continue;
+        const key = part.slice(0, idx).trim();
+        if (key === name) {
+            try {
+                return decodeURIComponent(part.slice(idx + 1).trim());
+            } catch (_) {
+                return part.slice(idx + 1).trim();
+            }
+        }
+    }
+    return '';
+}
+
+/**
+ * Extract whatever password credential the request carries: the login cookie,
+ * the `x-webui-password` header (used by the SPA's fetch calls), or a
+ * `?password=` query param.
+ * @param {import('express').Request} req
+ * @returns {string}
+ */
+function getProvidedPassword(req) {
+    return readCookie(req.headers['cookie'], AUTH_COOKIE)
+        || req.headers['x-webui-password']
+        || req.query.password
+        || '';
+}
+
 function createAuthMiddleware() {
     return (req, res, next) => {
         const password = config.webuiPassword;
@@ -121,11 +167,17 @@ function createAuthMiddleware() {
         const isApiRoute = req.path.startsWith('/api/');
         const isAuthUrl = req.path === '/api/auth/url';
         const isConfigGet = req.path === '/api/config' && req.method === 'GET';
-        const isProtected = (isApiRoute && !isAuthUrl && !isConfigGet) || req.path === '/account-limits' || req.path === '/health';
+        // Public auth endpoints powering the login page. These must remain
+        // reachable without a password so the client can discover whether a
+        // password is required and submit one to authenticate.
+        const isAuthStatus = req.path === '/api/auth/status';
+        const isAuthLogin = req.path === '/api/auth/login' && req.method === 'POST';
+        const isAuthLogout = req.path === '/api/auth/logout' && req.method === 'POST';
+        const isProtected = (isApiRoute && !isAuthUrl && !isConfigGet && !isAuthStatus && !isAuthLogin && !isAuthLogout)
+            || req.path === '/account-limits' || req.path === '/health';
 
         if (isProtected) {
-            const providedPassword = req.headers['x-webui-password'] || req.query.password;
-            if (providedPassword !== password) {
+            if (getProvidedPassword(req) !== password) {
                 return res.status(401).json({ status: 'error', error: 'Unauthorized: Password required' });
             }
         }
@@ -257,8 +309,106 @@ export function mountWebUI(app, dirname, accountManager) {
     // Apply auth middleware
     app.use(createAuthMiddleware());
 
+    // ------------------------------------------------------------------
+    // Static-page gate: lock the dashboard itself (not just the API).
+    // When a password is configured, an unauthenticated visitor must not be
+    // able to load the dashboard HTML/JS at all. Only the login page and its
+    // assets (plus the public auth endpoints, already exempted above) are
+    // reachable. HTML navigations are redirected to the login page; other
+    // asset requests get a 401. This is what prevents other people from using
+    // your setup without the env password.
+    // ------------------------------------------------------------------
+    const PUBLIC_STATIC = new Set([
+        '/login.html',
+        '/login.js',
+        '/favicon.svg',
+        '/css/style.css'
+    ]);
+    app.use((req, res, next) => {
+        const password = config.webuiPassword;
+        if (!password) return next();               // Open mode: no gate.
+        if (req.path.startsWith('/api/')) return next(); // APIs handled above.
+        if (PUBLIC_STATIC.has(req.path)) return next();  // Login page assets.
+
+        // Authenticated (valid cookie/header/query)? Let it through.
+        if (getProvidedPassword(req) === password) return next();
+
+        // Unauthenticated: send browser navigations to the login page, and
+        // reject direct asset fetches so nothing useful loads.
+        const accept = req.headers['accept'] || '';
+        if (req.method === 'GET' && accept.includes('text/html')) {
+            return res.redirect(302, '/login.html');
+        }
+        return res.status(401).json({ status: 'error', error: 'Unauthorized: Password required' });
+    });
+
     // Serve static files from public directory
     app.use(express.static(path.join(dirname, '../public')));
+
+    // ==========================================
+    // Login / Auth Status API (public)
+    // ==========================================
+
+    /**
+     * GET /api/auth/status - Report whether the WebUI requires a password.
+     * Public (exempt from auth middleware) so the login page and the dashboard
+     * gate can decide whether to prompt for a password.
+     *
+     * If a credential is supplied (login cookie, `x-webui-password` header, or
+     * `?password=`), also reports whether that credential is currently valid —
+     * letting the client verify a stored password before showing the dashboard.
+     */
+    app.get('/api/auth/status', (req, res) => {
+        const password = config.webuiPassword;
+        const required = !!password;
+        const authenticated = !required || getProvidedPassword(req) === password;
+        res.json({ status: 'ok', required, authenticated });
+    });
+
+    /**
+     * POST /api/auth/login - Validate a submitted password.
+     * Public (exempt from auth middleware). Body: { password: string }.
+     * On success sets an HttpOnly auth cookie so the server can gate the
+     * dashboard HTML/assets, and returns 200 { authenticated: true }.
+     * Returns 401 on failure.
+     */
+    app.post('/api/auth/login', (req, res) => {
+        const password = config.webuiPassword;
+
+        // No password configured -> WebUI is open; treat any login as success.
+        if (!password) {
+            return res.json({ status: 'ok', authenticated: true, required: false });
+        }
+
+        const { password: provided } = req.body || {};
+        if (typeof provided !== 'string' || provided.length === 0) {
+            return res.status(400).json({ status: 'error', error: 'Password is required' });
+        }
+
+        if (provided !== password) {
+            logger.warn(`[WebUI] Failed login attempt from ${req.ip}`);
+            return res.status(401).json({ status: 'error', authenticated: false, error: 'Invalid password' });
+        }
+
+        // Set an HttpOnly cookie so the browser is authenticated for subsequent
+        // dashboard/asset requests. Session cookie (no Max-Age) — clears when the
+        // browser closes; SameSite=Strict to avoid it riding cross-site requests.
+        res.setHeader('Set-Cookie', [
+            `${AUTH_COOKIE}=${encodeURIComponent(provided)}; Path=/; HttpOnly; SameSite=Strict`
+        ]);
+        res.json({ status: 'ok', authenticated: true, required: true });
+    });
+
+    /**
+     * POST /api/auth/logout - Clear the auth cookie.
+     * Public: clearing a credential is always allowed.
+     */
+    app.post('/api/auth/logout', (req, res) => {
+        res.setHeader('Set-Cookie', [
+            `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+        ]);
+        res.json({ status: 'ok', authenticated: false });
+    });
 
     // ==========================================
     // Account Management API

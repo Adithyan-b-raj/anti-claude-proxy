@@ -273,6 +273,7 @@ window.translations.en = {
     production: "Production",
     configSaved: "Configuration Saved",
     enterPassword: "Enter Web UI Password:",
+    logout: "Log out",
     ready: "READY",
     depleted: "Depleted",
     timeH: "H",

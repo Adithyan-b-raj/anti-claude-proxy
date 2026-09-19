@@ -108,6 +108,20 @@ document.addEventListener('alpine:init', () => {
             localStorage.setItem('app_lang', l);
         },
 
+        // Clear the stored WebUI password and return to the login page.
+        logout() {
+            try {
+                localStorage.removeItem('antigravity_webui_password');
+            } catch (e) { /* ignore */ }
+            this.webuiPassword = '';
+            // Clear the server-side auth cookie, then go to the login page.
+            fetch('/api/auth/logout', { method: 'POST' })
+                .catch(function () { /* ignore */ })
+                .finally(function () {
+                    window.location.replace('login.html');
+                });
+        },
+
         showToast(message, type = 'info') {
             const id = Date.now();
             this.toast = { message, type, id };
